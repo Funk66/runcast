@@ -1,4 +1,4 @@
-from re import search, findall
+from re import search, findall, sub
 from collections import namedtuple
 from logging import basicConfig, getLogger
 from datetime import datetime, timezone
@@ -19,12 +19,21 @@ SHOWS = [
         name="Today in Focus",
         rss="https://www.theguardian.com/news/series/todayinfocus/podcast.xml",
     ),
-    # Show(name="Today, Explained", rss="https://feeds.megaphone.fm/VMP5705694065"),
-    # Show(name="Philosophize This!", rss="https://philosophizethis.libsyn.com/rss/"),
-    # Show(
-    # name="The Cloudcast",
-    # rss="https://feeds.buzzsprout.com/3195.rss",
-    # ),
+    Show(name="Today, Explained", rss="https://feeds.megaphone.fm/VMP5705694065"),
+    Show(name="Philosophize This!", rss="https://philosophizethis.libsyn.com/rss/"),
+    Show(
+        name="The Cloudcast",
+        rss="https://feeds.buzzsprout.com/3195.rss",
+    ),
+    Show(name="Making Sense", rss="https://wakingup.libsyn.com/rss"),
+    Show(name="Cloud Security", rss="https://cloudsecuritypodcast.libsyn.com/rss"),
+    Show(
+        name="Screaming in the Cloud",
+        rss="https://feeds.transistor.fm/screaming-in-the-cloud",
+    ),
+    Show(
+        name="AWS Podcast", rss="https://d3gih7jbfe3jlq.cloudfront.net/aws-podcast.rss"
+    ),
 ]
 
 
@@ -77,16 +86,18 @@ def cleanup(path: Path) -> datetime:
     player_episodes = []
     dates = []
     for filename in path.iterdir():
+        download_date = datetime.fromtimestamp(
+            filename.stat().st_ctime, tz=timezone.utc
+        )
+        dates.append(download_date)
+        if filename.name == "last_sync":
+            continue
         show, title = (
             filename.name.split(" - ", maxsplit=1)
             if " - " in filename.name
             else ["", filename.name]
         )
-        download_date = datetime.fromtimestamp(
-            filename.stat().st_ctime, tz=timezone.utc
-        )
         player_episodes.append(Episode(show, title, download_date, filename, ""))
-        dates.append(download_date)
 
     selection = select(player_episodes)
     for i in selection:
@@ -110,18 +121,23 @@ def download(since: datetime, path: Path) -> None:
                     for link in entry["links"]
                     if link["type"].startswith("audio")
                 )
-                title = entry["title"].strip()
-                filepath = path / f"{show} - {title}.mp3"
+                title = sub('[^a-zA-Z0-9 ]', '', entry["title"].strip())
+                filepath = path / f"{show.name} - {title}.mp3"
                 new_episodes.append(Episode(show.name, title, published, filepath, url))
 
-    LOG.info("Select episodes to download")
-    selection = select(new_episodes)
-    for i in selection:
-        episode = new_episodes[i]
-        LOG.info(f"Downloading '{episode.title}'")
-        stream = get(episode.url)
-        with open(episode.filepath, "wb") as output:
-            output.write(stream.content)
+    if new_episodes:
+        LOG.info("Select episodes to download")
+        selection = select(new_episodes)
+        for i in selection:
+            episode = new_episodes[i]
+            LOG.info(f"Downloading '{episode.title}'")
+            stream = get(episode.url)
+            with open(episode.filepath, "wb") as output:
+                output.write(stream.content)
+
+        if not selection:
+            with open(path / "last_sync", "w") as textfile:
+                textfile.write(str(datetime.today()))
 
 
 def run() -> None:
